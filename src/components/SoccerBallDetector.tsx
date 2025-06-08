@@ -1,16 +1,37 @@
+/**
+ * @file SoccerBallDetector.tsx
+ * Main React component for the Soccer Ball Detector application.
+ * It provides UI for uploading images (single, bulk, or via URL),
+ * adjusting detection parameters, and viewing detection results.
+ * Detection logic is primarily handled by the BallDetectionEngine.
+ */
 
-import React, { useState, useRef } from 'react';
-import { Button } from '@/components/ui/button';
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button'; // Assuming Button is not used directly here, but useful for context
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, Link, Image as ImageIcon, Video, FileImage } from 'lucide-react';
+import { Upload, Link, Image as ImageIcon, Video, FileImage, Settings } from 'lucide-react';
 import { toast } from 'sonner';
 import ImageUpload from './ImageUpload';
 import UrlInput from './UrlInput';
 import BulkUpload from './BulkUpload';
 import DetectionResults from './DetectionResults';
 import { BallDetectionEngine } from './BallDetectionEngine';
+import DetectionParameters from './DetectionParameters';
+import { DetectionParams } from './AdvancedSoccerDetector'; // Using type from AdvancedSoccerDetector for consistency
 
+/**
+ * @interface DetectionResult
+ * Defines the structure for a single detection result object.
+ * @property {string} id - Unique ID for the result.
+ * @property {string} imageUrl - Data URL of the image with detections highlighted.
+ * @property {string} [originalImageUrl] - Original URL of the processed image.
+ * @property {string} fileName - Name of the processed file.
+ * @property {Array<object>} detections - Array of detected ball objects.
+ * @property {number} detections[].confidence - Confidence score.
+ * @property {object} detections[].bbox - Normalized bounding box.
+ * @property {Date} processedAt - Timestamp of processing.
+ */
 export interface DetectionResult {
   id: string;
   imageUrl: string;
@@ -28,49 +49,149 @@ export interface DetectionResult {
   processedAt: Date;
 }
 
-const SoccerBallDetector = () => {
-  const [activeTab, setActiveTab] = useState('upload');
+/**
+ * SoccerBallDetector component.
+ * Provides the main UI and orchestrates the image processing workflow.
+ * @returns {JSX.Element} The rendered component.
+ */
+const SoccerBallDetector = (): JSX.Element => {
+  const [activeTab, setActiveTab] = useState<string>('upload');
   const [results, setResults] = useState<DetectionResult[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const detectionEngine = useRef(new BallDetectionEngine());
 
+  // State for detection parameters, initialized with default values.
+  const [detectionParams, setDetectionParams] = useState<DetectionParams>({
+    minDistance: 50,
+    cannyThreshold: 100,
+    circleThreshold: 30,
+    minRadius: 10,
+    maxRadius: 100,
+    blurKernelSize: 5,
+    dp: 1,
+  });
+
+  /**
+   * Effect hook to terminate the detection worker when the component unmounts.
+   */
+  useEffect(() => {
+    const currentEngineInstance = detectionEngine.current;
+    return () => {
+      currentEngineInstance.terminateWorker();
+    };
+  }, []); // Empty dependency array ensures this runs only on mount and unmount
+
+  /**
+   * Callback to update detection parameters from the DetectionParameters component.
+   * @param {DetectionParams} newParams - The new set of parameters.
+   */
+  const handleParametersChange = (newParams: DetectionParams) => {
+    setDetectionParams(newParams);
+  };
+
+  /**
+   * Processes a single image (from upload or URL).
+   * @async
+   * @param {string} imageUrl - The URL of the image to process (can be a data URL or external URL).
+   * @param {string} fileName - The name associated with the image.
+   */
   const processImage = async (imageUrl: string, fileName: string) => {
     setIsProcessing(true);
     try {
-      const result = await detectionEngine.current.detectBalls(imageUrl, fileName);
-      setResults(prev => [result, ...prev]);
-      
+      const result = await detectionEngine.current.detectBalls(imageUrl, fileName, detectionParams);
+      setResults(prev => [result, ...prev]); // Prepend new result
       toast.success(`Detected ${result.detections.length} soccer ball(s) in ${fileName}`);
-    } catch (error) {
-      toast.error('Failed to process image');
-      console.error('Detection error:', error);
+    } catch (error: any) {
+      console.error(`Detection error for ${fileName}:`, error);
+      // Attempt to provide more user-friendly messages based on error content
+      let toastMessage = `Failed to process ${fileName}: An unknown error occurred.`;
+      if (error && typeof error.message === 'string') {
+        if (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available')) {
+          toastMessage = 'Detection engine is not ready. Please try again or contact support.';
+        } else if (error.message.startsWith('Failed to load image')) {
+          toastMessage = `Error loading image ${fileName}: ${error.message}`;
+        } else if (error.message.startsWith('Error processing image') || error.message.includes('Details:')) {
+          // Extract details if present, otherwise use the main message
+          const detailIndex = error.message.indexOf('Details:');
+          toastMessage = `Failed to process ${fileName}: ${detailIndex !== -1 ? error.message.substring(detailIndex + 8) : error.message}`;
+        } else if (error.message.includes('timed out')) {
+            toastMessage = `Processing for ${fileName} timed out. Please try again.`;
+        } else {
+            toastMessage = `Failed to process ${fileName}: ${error.message}`;
+        }
+      }
+      toast.error(toastMessage);
     } finally {
       setIsProcessing(false);
     }
   };
 
+  /**
+   * Processes multiple images from a bulk upload.
+   * @async
+   * @param {File[]} files - An array of File objects to process.
+   */
   const processBulkImages = async (files: File[]) => {
-    setIsProcessing(true);
-    try {
-      const newResults: DetectionResult[] = [];
-      
-      for (const file of files) {
-        const imageUrl = URL.createObjectURL(file);
-        const result = await detectionEngine.current.detectBalls(imageUrl, file.name);
-        newResults.push(result);
-        
-        // Add a small delay to show progress
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      
-      setResults(prev => [...newResults, ...prev]);
-      toast.success(`Processed ${files.length} images successfully`);
-    } catch (error) {
-      toast.error('Failed to process bulk images');
-      console.error('Bulk processing error:', error);
-    } finally {
-      setIsProcessing(false);
+    if (files.length === 0) {
+      toast.info("No files selected for bulk processing.");
+      return;
     }
+    setIsProcessing(true);
+    let aFileFailed = false;
+    const newResults: DetectionResult[] = [];
+    let successfulUploads = 0;
+
+    for (const file of files) {
+      const imageUrl = URL.createObjectURL(file);
+      try {
+        const result = await detectionEngine.current.detectBalls(imageUrl, file.name, detectionParams);
+        newResults.push(result);
+        successfulUploads++;
+        toast.success(`Processed ${file.name} successfully.`);
+      } catch (error: any) {
+        aFileFailed = true;
+        console.error(`Error processing ${file.name} during bulk upload:`, error);
+        let toastMessage = `Failed to process ${file.name}: An unknown error occurred.`;
+         if (error && typeof error.message === 'string') {
+            if (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available')) {
+              toastMessage = 'Detection engine is not ready. Bulk processing halted.';
+              toast.error(toastMessage);
+              break; // Halt further processing for fundamental issues
+            } else if (error.message.startsWith('Failed to load image')) {
+              toastMessage = `Error loading image ${file.name}: ${error.message}`;
+            } else if (error.message.startsWith('Error processing image') || error.message.includes('Details:')) {
+              const detailIndex = error.message.indexOf('Details:');
+              toastMessage = `Failed to process ${file.name}: ${detailIndex !== -1 ? error.message.substring(detailIndex + 8) : error.message}`;
+            } else if (error.message.includes('timed out')) {
+                toastMessage = `Processing for ${file.name} timed out.`;
+            } else {
+                toastMessage = `Failed to process ${file.name}: ${error.message}`;
+            }
+        }
+        toast.error(toastMessage);
+      } finally {
+        URL.revokeObjectURL(imageUrl); // Clean up object URL
+        // Optional: Small delay for UI updates if processing many files rapidly.
+        // await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (error && typeof error.message === 'string' && (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available'))) {
+        break; // Ensure loop termination if fundamental error occurred
+      }
+    }
+
+    setResults(prev => [...newResults, ...prev]); // Prepend all new results
+
+    if (successfulUploads > 0 && !aFileFailed) {
+      toast.success(`Processed all ${files.length} images successfully.`);
+    } else if (successfulUploads > 0 && aFileFailed) {
+      toast.info(`Processed ${successfulUploads} out of ${files.length} images. Some images failed.`);
+    } else if (successfulUploads === 0 && files.length > 0 && aFileFailed) {
+      // Individual errors already toasted. If loop was broken, specific message shown.
+      // If all failed without breaking, this implies individual toasts were sufficient.
+    }
+    // Note: if files.length was 0 initially, that's handled at the start.
+
+    setIsProcessing(false);
   };
 
   return (
@@ -85,8 +206,19 @@ const SoccerBallDetector = () => {
           </p>
         </div>
 
+        <Card className="mb-8 bg-white shadow-xl border-green-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-green-800">
+              <Settings className="h-5 w-5" />
+              Detection Settings
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DetectionParameters params={detectionParams} onChange={handleParametersChange} />
+          </CardContent>
+        </Card>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Detection Input Panel */}
           <Card className="bg-white shadow-xl border-green-200">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-green-800">
@@ -95,19 +227,16 @@ const SoccerBallDetector = () => {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
                 <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="upload" className="flex items-center gap-1">
-                    <Upload className="h-4 w-4" />
-                    Upload
+                    <Upload className="h-4 w-4" /> Upload
                   </TabsTrigger>
                   <TabsTrigger value="url" className="flex items-center gap-1">
-                    <Link className="h-4 w-4" />
-                    URL
+                    <Link className="h-4 w-4" /> URL
                   </TabsTrigger>
                   <TabsTrigger value="bulk" className="flex items-center gap-1">
-                    <FileImage className="h-4 w-4" />
-                    Bulk
+                    <FileImage className="h-4 w-4" /> Bulk
                   </TabsTrigger>
                 </TabsList>
 
@@ -117,14 +246,12 @@ const SoccerBallDetector = () => {
                     isProcessing={isProcessing}
                   />
                 </TabsContent>
-
                 <TabsContent value="url" className="mt-6">
                   <UrlInput 
                     onUrlSubmit={processImage}
                     isProcessing={isProcessing}
                   />
                 </TabsContent>
-
                 <TabsContent value="bulk" className="mt-6">
                   <BulkUpload 
                     onBulkUpload={processBulkImages}
@@ -135,7 +262,6 @@ const SoccerBallDetector = () => {
             </CardContent>
           </Card>
 
-          {/* Results Panel */}
           <Card className="bg-white shadow-xl border-green-200">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-green-800">

@@ -1,207 +1,166 @@
+/**
+ * @file BallDetectionEngine.tsx
+ * This class serves as an interface to a Web Worker that performs OpenCV-based ball detection.
+ * It handles communication with the worker, including sending image data and parameters,
+ * and receiving detection results or errors.
+ */
 
 import { DetectionResult } from './SoccerBallDetector';
+import { DetectionParams } from './AdvancedSoccerDetector';
 
-export interface BallDetection {
-  x: number;
-  y: number;
-  radius: number;
-  confidence: number;
+/**
+ * @interface PendingRequest
+ * Represents a pending request made to the Web Worker.
+ * It stores the `resolve` and `reject` functions of the Promise returned by `detectBalls`,
+ * and an optional timer for request timeouts.
+ * @property {function} resolve - Function to resolve the Promise with a DetectionResult.
+ * @property {function} reject - Function to reject the Promise with an error.
+ * @property {number} [timer] - ID of the timeout timer for this request.
+ */
+interface PendingRequest {
+  resolve: (value: DetectionResult) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  reject: (reason?: any) => void;
+  timer?: number;
 }
 
+/**
+ * @class BallDetectionEngine
+ * Manages the Web Worker for OpenCV ball detection. It sends detection tasks to the worker
+ * and returns results as Promises.
+ */
 export class BallDetectionEngine {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private worker: Worker | null = null;
+  private requests: Map<string, PendingRequest> = new Map(); // Map of request ID to PendingRequest
+  private nextRequestId = 0; // Counter for generating unique request IDs
 
+  /**
+   * Initializes the BallDetectionEngine and creates a new Web Worker.
+   * Sets up message and error handlers for worker communication.
+   */
   constructor() {
-    this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d')!;
-  }
+    if (typeof Worker !== 'undefined') {
+      // Create a new worker instance. The worker script is built by Vite.
+      // `import.meta.url` is used to correctly resolve the path to the worker script
+      // relative to the current module's URL.
+      this.worker = new Worker(new URL('../workers/opencv.worker.ts', import.meta.url), { type: 'module' });
 
-  async detectBalls(imageUrl: string, fileName: string): Promise<DetectionResult> {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      
-      img.onload = () => {
-        // Set canvas size to match image
-        this.canvas.width = img.width;
-        this.canvas.height = img.height;
-        
-        // Draw original image
-        this.ctx.drawImage(img, 0, 0);
-        
-        // Simulate ball detection with realistic positions
-        const detections = this.simulateDetection(img.width, img.height);
-        
-        // Draw detection highlights
-        this.drawDetections(detections);
-        
-        // Create result with highlighted image
-        const highlightedImageUrl = this.canvas.toDataURL();
-        
-        const result: DetectionResult = {
-          id: Math.random().toString(36).substr(2, 9),
-          imageUrl: highlightedImageUrl,
-          originalImageUrl: imageUrl,
-          fileName,
-          detections: detections.map(d => ({
-            confidence: d.confidence,
-            bbox: {
-              x: (d.x - d.radius) / img.width,
-              y: (d.y - d.radius) / img.height,
-              width: (d.radius * 2) / img.width,
-              height: (d.radius * 2) / img.height,
-            }
-          })),
-          processedAt: new Date(),
-        };
-        
-        resolve(result);
-      };
-      
-      img.src = imageUrl;
-    });
-  }
+      /**
+       * Handles messages received from the Web Worker.
+       * @param {MessageEvent} event - The message event from the worker.
+       * @param {string} event.data.id - The ID of the request this message corresponds to.
+       * @param {DetectionResult} [event.data.result] - The detection result, if successful.
+       * @param {object} [event.data.error] - An error object, if an error occurred in the worker.
+       */
+      this.worker.onmessage = (event: MessageEvent<{id: string, result?: DetectionResult, error?: {message: string, name?: string}}>) => {
+        const { id, result, error } = event.data;
+        const pending = this.requests.get(id);
 
-  private simulateDetection(width: number, height: number): BallDetection[] {
-    const numBalls = Math.floor(Math.random() * 3) + 1;
-    const detections: BallDetection[] = [];
-    
-    for (let i = 0; i < numBalls; i++) {
-      const radius = 20 + Math.random() * 40;
-      const x = radius + Math.random() * (width - radius * 2);
-      const y = radius + Math.random() * (height - radius * 2);
-      const confidence = 0.75 + Math.random() * 0.24;
-      
-      detections.push({ x, y, radius, confidence });
-    }
-    
-    return detections;
-  }
+        if (pending) {
+          if (pending.timer) clearTimeout(pending.timer); // Clear the timeout timer
 
-  private drawDetections(detections: BallDetection[]) {
-    detections.forEach((detection, index) => {
-      const { x, y, radius, confidence } = detection;
-      
-      // Draw circle outline
-      this.ctx.strokeStyle = '#00ff00';
-      this.ctx.lineWidth = 3;
-      this.ctx.beginPath();
-      this.ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      this.ctx.stroke();
-      
-      // Draw confidence label
-      this.ctx.fillStyle = '#00ff00';
-      this.ctx.font = 'bold 16px Arial';
-      this.ctx.fillText(
-        `Ball ${index + 1}: ${(confidence * 100).toFixed(0)}%`,
-        x - radius,
-        y - radius - 10
-      );
-      
-      // Draw center point
-      this.ctx.fillStyle = '#ff0000';
-      this.ctx.beginPath();
-      this.ctx.arc(x, y, 3, 0, 2 * Math.PI);
-      this.ctx.fill();
-    });
-  }
-
-  async detectWithOpenCV(imageUrl: string, fileName: string, params: any): Promise<DetectionResult> {
-    if (!window.cv) {
-      throw new Error('OpenCV not loaded');
-    }
-
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      
-      img.onload = () => {
-        try {
-          // Set canvas size
-          this.canvas.width = img.width;
-          this.canvas.height = img.height;
-          this.ctx.drawImage(img, 0, 0);
-          
-          // Get image data for OpenCV
-          const imageData = this.ctx.getImageData(0, 0, img.width, img.height);
-          const src = window.cv.matFromImageData(imageData);
-          const gray = new window.cv.Mat();
-          const circles = new window.cv.Mat();
-          
-          // Convert to grayscale
-          window.cv.cvtColor(src, gray, window.cv.COLOR_RGBA2GRAY);
-          
-          // Apply Gaussian blur
-          const blurred = new window.cv.Mat();
-          const ksize = new window.cv.Size(params.blurKernel || 5, params.blurKernel || 5);
-          window.cv.GaussianBlur(gray, blurred, ksize, 0);
-          
-          // Detect circles using HoughCircles
-          window.cv.HoughCircles(
-            blurred,
-            circles,
-            window.cv.HOUGH_GRADIENT,
-            1,
-            params.minDistance || 50,
-            params.cannyThreshold || 100,
-            params.circleThreshold || 30,
-            params.minRadius || 10,
-            params.maxRadius || 100
-          );
-          
-          // Draw results
-          const detections: BallDetection[] = [];
-          for (let i = 0; i < circles.cols; ++i) {
-            const x = circles.data32F[i * 3];
-            const y = circles.data32F[i * 3 + 1];
-            const radius = circles.data32F[i * 3 + 2];
-            
-            detections.push({
-              x,
-              y,
-              radius,
-              confidence: 0.8 + Math.random() * 0.15
-            });
+          if (error) {
+            const e = new Error(error.message || 'Unknown worker error');
+            e.name = error.name || 'WorkerError';
+            pending.reject(e);
+          } else if (result) {
+            // Rehydrate Date object from the stringified version sent by the worker
+            const finalResult: DetectionResult = {
+              ...result,
+              processedAt: new Date(result.processedAt),
+            };
+            pending.resolve(finalResult);
+          } else {
+             // Should not happen if worker adheres to protocol, but handle defensively
+            pending.reject(new Error('Worker returned an invalid message format.'));
           }
-          
-          // Clear canvas and redraw with detections
-          this.ctx.clearRect(0, 0, img.width, img.height);
-          this.ctx.drawImage(img, 0, 0);
-          this.drawDetections(detections);
-          
-          // Clean up OpenCV mats
-          src.delete();
-          gray.delete();
-          blurred.delete();
-          circles.delete();
-          
-          const result: DetectionResult = {
-            id: Math.random().toString(36).substr(2, 9),
-            imageUrl: this.canvas.toDataURL(),
-            originalImageUrl: imageUrl,
-            fileName,
-            detections: detections.map(d => ({
-              confidence: d.confidence,
-              bbox: {
-                x: (d.x - d.radius) / img.width,
-                y: (d.y - d.radius) / img.height,
-                width: (d.radius * 2) / img.width,
-                height: (d.radius * 2) / img.height,
-              }
-            })),
-            processedAt: new Date(),
-          };
-          
-          resolve(result);
-        } catch (error) {
-          console.error('OpenCV detection error:', error);
-          // Fallback to simple detection
-          this.detectBalls(imageUrl, fileName).then(resolve);
+          this.requests.delete(id); // Remove the request from the map
         }
       };
+
+      /**
+       * Handles critical errors from the Web Worker itself (e.g., script loading failure).
+       * @param {Event} error - The error event from the worker.
+       */
+      this.worker.onerror = (error) => {
+        console.error('Critical Worker error:', error);
+        // Reject all pending requests as the worker is likely unusable
+        this.requests.forEach(pending => {
+          if (pending.timer) clearTimeout(pending.timer);
+          pending.reject(new Error(`Worker failed: ${error.message || 'Underlying worker script error'}`));
+        });
+        this.requests.clear();
+        this.worker = null; // Mark worker as unusable
+      };
+    } else {
+      console.error('Web Workers are not supported in this environment.');
+      // Applications using this engine should handle the case where the worker cannot be initialized.
+    }
+  }
+
+  /**
+   * Sends an image and detection parameters to the Web Worker for processing.
+   * @async
+   * @param {string} imageUrl - The URL of the image to process.
+   * @param {string} fileName - The name of the image file.
+   * @param {DetectionParams} params - An object containing detection parameters for OpenCV.
+   * @returns {Promise<DetectionResult>} A Promise that resolves with the detection results
+   * or rejects with an error.
+   * @throws {Error} If the worker is not available or if the message cannot be posted.
+   */
+  async detectBalls(imageUrl: string, fileName: string, params: DetectionParams): Promise<DetectionResult> {
+    if (!this.worker) {
+      return Promise.reject(new Error('OpenCV Worker is not available or not initialized.'));
+    }
+
+    const requestId = `req-${this.nextRequestId++}`;
+    
+    return new Promise((resolve, reject) => {
+      const timeout = 30000; // 30 seconds timeout for worker response
+      const timer = setTimeout(() => {
+        if (this.requests.has(requestId)) {
+          this.requests.delete(requestId);
+          reject(new Error(`Request to worker timed out after ${timeout / 1000}s for image ${fileName}`));
+        }
+      }, timeout);
+
+      this.requests.set(requestId, { resolve, reject, timer });
       
-      img.src = imageUrl;
+      try {
+        // Post the task to the worker
+        this.worker!.postMessage({
+          id: requestId,
+          imageUrl,
+          fileName,
+          params,
+        });
+      } catch (postMessageError) {
+        // Handle immediate errors from postMessage (e.g., worker already terminated)
+        if (this.requests.has(requestId)) {
+            this.requests.delete(requestId);
+        }
+        clearTimeout(timer);
+        const errorDetail = postMessageError instanceof Error ? postMessageError.message : String(postMessageError);
+        reject(new Error(`Failed to send message to worker: ${errorDetail}`));
+      }
     });
+  }
+
+  /**
+   * Terminates the Web Worker.
+   * This should be called when the engine is no longer needed (e.g., component unmount)
+   * to free up resources. All pending requests will be rejected.
+   */
+  public terminateWorker(): void {
+    if (this.worker) {
+      this.worker.terminate();
+      this.worker = null;
+      this.requests.forEach(pending => {
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.reject(new Error('Worker terminated by explicit call.'));
+      });
+      this.requests.clear();
+      console.log('OpenCV Worker terminated.');
+    }
   }
 }
