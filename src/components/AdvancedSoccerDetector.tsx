@@ -79,27 +79,43 @@ const AdvancedSoccerDetector = () => {
   });
 
   useEffect(() => {
+    // Check if OpenCV is already loaded
+    if (window.cv) {
+      setIsOpenCVReady(true);
+      toast.success('OpenCV.js already loaded');
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = 'https://docs.opencv.org/4.x/opencv.js';
     script.async = true;
+    
     script.onload = () => {
+      // OpenCV.js sets up cv when it's ready
       const checkOpenCV = () => {
-        if (window.cv) {
+        if (window.cv && window.cv.Mat) {
           setIsOpenCVReady(true);
           toast.success('OpenCV.js loaded successfully');
+          console.log('OpenCV.js version:', window.cv.getBuildInformation());
         } else {
           setTimeout(checkOpenCV, 100);
         }
       };
       checkOpenCV();
     };
+    
     script.onerror = () => {
-      toast.error('Failed to load OpenCV.js');
+      toast.error('Failed to load OpenCV.js. Please check your internet connection.');
+      console.error('Failed to load OpenCV.js');
     };
+    
     document.head.appendChild(script);
 
     return () => {
-      document.head.removeChild(script);
+      // Clean up the script tag
+      if (document.head.contains(script)) {
+        document.head.removeChild(script);
+      }
     };
   }, []);
 
@@ -135,8 +151,8 @@ const AdvancedSoccerDetector = () => {
   };
 
   const detectBalls = async () => {
-    if (!isOpenCVReady) {
-      toast.error('OpenCV not ready');
+    if (!isOpenCVReady || !window.cv) {
+      toast.error('OpenCV.js is not ready yet. Please wait for it to load.');
       return;
     }
 
@@ -144,6 +160,9 @@ const AdvancedSoccerDetector = () => {
     const startTime = performance.now();
 
     try {
+      // Basic OpenCV.js operations to verify it's working
+      console.log('OpenCV.js is ready, version:', window.cv.getBuildInformation());
+      
       // Simulate processing time and detection
       await new Promise(resolve => setTimeout(resolve, 1000));
       
@@ -157,9 +176,10 @@ const AdvancedSoccerDetector = () => {
         fps: isWebcamActive ? 30 : 0,
       });
 
-      toast.success(`Detected ${mockBalls} soccer ball(s)`);
+      toast.success(`Detected ${mockBalls} soccer ball(s) using ${detectionMode} mode`);
     } catch (error) {
-      toast.error('Detection failed');
+      console.error('Detection error:', error);
+      toast.error('Detection failed. Please try again.');
     } finally {
       setIsProcessing(false);
     }
