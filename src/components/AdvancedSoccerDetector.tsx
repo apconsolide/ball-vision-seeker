@@ -210,7 +210,7 @@ const AdvancedSoccerDetector = (): JSX.Element => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setIsWebcamActive(true);
-        setCurrentMedia(videoRef.current.toDataURL()); // Placeholder or use stream directly
+        setCurrentMedia(null); // Clear currentMedia when using webcam
         setProcessedResults(null);
         toast.success('Webcam activated');
       }

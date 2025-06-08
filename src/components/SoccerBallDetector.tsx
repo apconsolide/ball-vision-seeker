@@ -143,12 +143,14 @@ const SoccerBallDetector = (): JSX.Element => {
 
     for (const file of files) {
       const imageUrl = URL.createObjectURL(file);
+      let processError: any = null;
       try {
         const result = await detectionEngine.current.detectBalls(imageUrl, file.name, detectionParams);
         newResults.push(result);
         successfulUploads++;
         toast.success(`Processed ${file.name} successfully.`);
       } catch (error: any) {
+        processError = error;
         aFileFailed = true;
         console.error(`Error processing ${file.name} during bulk upload:`, error);
         let toastMessage = `Failed to process ${file.name}: An unknown error occurred.`;
@@ -174,7 +176,7 @@ const SoccerBallDetector = (): JSX.Element => {
         // Optional: Small delay for UI updates if processing many files rapidly.
         // await new Promise(resolve => setTimeout(resolve, 50));
       }
-      if (error && typeof error.message === 'string' && (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available'))) {
+      if (processError && typeof processError.message === 'string' && (processError.message.includes('OpenCV is not loaded') || processError.message.includes('OpenCV Worker is not available'))) {
         break; // Ensure loop termination if fundamental error occurred
       }
     }
