@@ -19,6 +19,7 @@ import AdvancedSettings from './AdvancedSettings';
 import DetectionModes from './DetectionModes';
 import MediaDisplay from './MediaDisplay';
 import StatisticsPanel from './StatisticsPanel';
+import RoboflowApiKeyInput from './RoboflowApiKeyInput';
 import { BallDetectionEngine } from './BallDetectionEngine';
 import { DetectionResult } from './SoccerBallDetector'; // Re-use DetectionResult type
 
@@ -90,11 +91,11 @@ export interface DetectionStats {
  * @returns {JSX.Element} The rendered component.
  */
 const AdvancedSoccerDetector = (): JSX.Element => {
-  const [isOpenCVReady, setIsOpenCVReady] = useState<boolean>(false);
+  const [isRoboflowReady, setIsRoboflowReady] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isWebcamActive, setIsWebcamActive] = useState<boolean>(false);
   const [currentMedia, setCurrentMedia] = useState<string | null>(null); // URL for image/video blob
-  const [detectionMode, setDetectionMode] = useState<string>('standard'); // E.g., 'standard', 'color_filter'
+  const [detectionMode, setDetectionMode] = useState<string>('roboflow'); // E.g., 'standard', 'color_filter'
   const [processedResults, setProcessedResults] = useState<string | null>(null); // URL for the highlighted image
   
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -133,46 +134,16 @@ const AdvancedSoccerDetector = (): JSX.Element => {
   });
 
   /**
-   * Effect hook to load the OpenCV.js script from CDN.
+   * Effect hook to load the Roboflow API key from local storage.
    * Manages script loading state and provides feedback via toasts.
    */
   useEffect(() => {
-    if (window.cv) { // Check if already loaded by another instance or a previous session
-      setIsOpenCVReady(true);
-      toast.success('OpenCV.js already loaded');
-      return;
+    const savedKey = localStorage.getItem('roboflow_api_key');
+    if (savedKey) {
+      setIsRoboflowReady(true);
+      detectionEngine.current.setApiKey(savedKey);
     }
-
-    const script = document.createElement('script');
-    script.src = 'https://docs.opencv.org/4.x/opencv.js';
-    script.async = true;
-    
-    script.onload = () => {
-      const checkOpenCV = () => { // Poll until window.cv is available
-        if (window.cv && window.cv.Mat) {
-          setIsOpenCVReady(true);
-          toast.success('OpenCV.js loaded successfully');
-          console.log('OpenCV.js version:', window.cv.getBuildInformation());
-        } else {
-          setTimeout(checkOpenCV, 100); // Check again shortly
-        }
-      };
-      checkOpenCV();
-    };
-    
-    script.onerror = () => {
-      toast.error('Failed to load OpenCV.js. Please check your internet connection.');
-      console.error('Failed to load OpenCV.js from CDN.');
-    };
-    
-    document.head.appendChild(script);
-
-    return () => { // Cleanup function
-      if (document.head.contains(script)) {
-        document.head.removeChild(script);
-      }
-    };
-  }, []); // Runs once on component mount
+  }, []);
 
   /**
    * Effect hook to terminate the detection worker when the component unmounts.
@@ -261,8 +232,8 @@ const AdvancedSoccerDetector = (): JSX.Element => {
       return;
     }
 
-    if (!isOpenCVReady || !window.cv) { // Check main thread's understanding of OpenCV readiness
-      toast.error("OpenCV is not ready in the main application. Cannot start detection.");
+    if (!isRoboflowReady) {
+      toast.error("Please configure your Roboflow API key first.");
       return;
     }
 
@@ -296,15 +267,17 @@ const AdvancedSoccerDetector = (): JSX.Element => {
         fps: isWebcamActive ? Math.round(1000 / (processingTime || 1)) : 0, // Simplified FPS for single frame
       });
 
-      toast.success(`Detected ${result.detections.length} soccer ball(s) using ${detectionMode} mode.`);
+      toast.success(`Detected ${result.detections.length} soccer ball(s) using Roboflow.`);
     } catch (error: any) {
       console.error('Detection error in AdvancedSoccerDetector:', error);
       let toastMessage = 'Detection failed. Please try again.';
        if (error && typeof error.message === 'string') {
-        if (error.message.includes('OpenCV Worker is not available')) {
-          toastMessage = 'Detection engine worker is not responding. Please refresh.';
+        if (error.message.includes('API key is required')) {
+          toastMessage = 'Please configure your Roboflow API key first.';
         } else if (error.message.includes('timed out')) {
             toastMessage = `Detection process timed out. The image might be too complex or large.`;
+        } else if (error.message.includes('Roboflow API error')) {
+            toastMessage = `Roboflow API error: ${error.message}`;
         } else {
             toastMessage = `Detection error: ${error.message}`;
         }
@@ -369,20 +342,24 @@ const AdvancedSoccerDetector = (): JSX.Element => {
             ⚽ Advanced Soccer Ball Detector
           </h1>
           <p className="text-lg text-blue-600">
-            OpenCV-powered real-time detection with advanced parameter controls
+            Roboflow-powered real-time detection with advanced parameter controls
           </p>
           <div className="mt-4">
-            <Badge variant={isOpenCVReady ? "default" : "destructive"} className="text-sm">
-              OpenCV Status: {isOpenCVReady ? 'Ready' : 'Loading... (Check console for errors if stuck)'}
+            <Badge variant={isRoboflowReady ? "default" : "destructive"} className="text-sm">
+              Roboflow Status: {isRoboflowReady ? 'Ready' : 'API Key Required'}
             </Badge>
           </div>
         </div>
+
+        {/* API Key Configuration */}
+        <RoboflowApiKeyInput onApiKeySet={handleApiKeySet} />
 
         {/* Main Grid: Controls, Media Display, Parameters */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           {/* Column 1: Controls Panel */}
           <div className="xl:col-span-1 space-y-4">
-            <Card> {/* Input Options Card */}
+            {/* Input Options Card */}
+            <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><Upload className="h-5 w-5" />Input Options</CardTitle></CardHeader>
               <CardContent className="space-y-4">
                 <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={handleFileUpload} className="hidden" />
@@ -397,9 +374,9 @@ const AdvancedSoccerDetector = (): JSX.Element => {
 
             <DetectionModes currentMode={detectionMode} onModeChange={setDetectionMode} />
 
-            <Card> {/* Control Buttons Card */}
+            <Card>
               <CardContent className="p-4 space-y-3">
-                <Button onClick={detectBalls} disabled={isProcessing || !isOpenCVReady} className="w-full">
+                <Button onClick={detectBalls} disabled={isProcessing || !isRoboflowReady} className="w-full">
                   <Play className="h-4 w-4 mr-2" />{isProcessing ? 'Detecting...' : 'Detect Balls'}
                 </Button>
                 <div className="grid grid-cols-2 gap-2">

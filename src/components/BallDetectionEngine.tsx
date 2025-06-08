@@ -9,99 +9,112 @@ interface PendingRequest {
 }
 
 export class BallDetectionEngine {
-  private worker: Worker | null = null;
   private requests: Map<string, PendingRequest> = new Map();
   private nextRequestId = 0;
+  private roboflowApiKey: string | null = null;
 
   constructor() {
-    if (typeof Worker !== 'undefined') {
-      try {
-        this.worker = new Worker(new URL('../workers/opencv.worker.ts', import.meta.url), { type: 'module' });
-        
-        this.worker.onmessage = (event: MessageEvent<{id: string, result?: DetectionResult, error?: {message: string, name?: string}}>) => {
-          const { id, result, error } = event.data;
-          const pending = this.requests.get(id);
+    // Check for Roboflow API key in localStorage
+    this.roboflowApiKey = localStorage.getItem('roboflow_api_key');
+  }
 
-          if (pending) {
-            if (pending.timer) clearTimeout(pending.timer);
-
-            if (error) {
-              const e = new Error(error.message || 'Unknown worker error');
-              e.name = error.name || 'WorkerError';
-              pending.reject(e);
-            } else if (result) {
-              const finalResult: DetectionResult = {
-                ...result,
-                processedAt: new Date(result.processedAt),
-              };
-              pending.resolve(finalResult);
-            } else {
-              pending.reject(new Error('Worker returned an invalid message format.'));
-            }
-            this.requests.delete(id);
-          }
-        };
-
-        this.worker.onerror = (error) => {
-          console.error('Critical Worker error:', error);
-          this.requests.forEach(pending => {
-            if (pending.timer) clearTimeout(pending.timer);
-            pending.reject(new Error(`Worker failed: ${error.message || 'Underlying worker script error'}`));
-          });
-          this.requests.clear();
-          this.worker = null;
-        };
-      } catch (error) {
-        console.error('Failed to create worker:', error);
-        this.worker = null;
-      }
-    } else {
-      console.error('Web Workers are not supported in this environment.');
-    }
+  setApiKey(apiKey: string) {
+    this.roboflowApiKey = apiKey;
+    localStorage.setItem('roboflow_api_key', apiKey);
   }
 
   async detectBalls(imageUrl: string, fileName: string, params: DetectionParams): Promise<DetectionResult> {
-    // If worker is not available, use fallback detection
-    if (!this.worker) {
-      return this.fallbackDetection(imageUrl, fileName);
+    if (!this.roboflowApiKey) {
+      throw new Error('Roboflow API key is required. Please set your API key first.');
     }
 
     const requestId = `req-${this.nextRequestId++}`;
     
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       const timeout = 30000;
       const timer = setTimeout(() => {
         if (this.requests.has(requestId)) {
           this.requests.delete(requestId);
-          reject(new Error(`Request to worker timed out after ${timeout / 1000}s for image ${fileName}`));
+          reject(new Error(`Request timed out after ${timeout / 1000}s for image ${fileName}`));
         }
       }, timeout);
 
       this.requests.set(requestId, { resolve, reject, timer });
       
       try {
-        this.worker!.postMessage({
-          id: requestId,
-          imageUrl,
-          fileName,
-          params,
-        });
-      } catch (postMessageError) {
-        if (this.requests.has(requestId)) {
-          this.requests.delete(requestId);
+        // Convert image to base64 if it's a blob URL
+        let base64Image = imageUrl;
+        if (imageUrl.startsWith('blob:') || imageUrl.startsWith('data:')) {
+          base64Image = await this.convertToBase64(imageUrl);
         }
-        clearTimeout(timer);
-        const errorDetail = postMessageError instanceof Error ? postMessageError.message : String(postMessageError);
-        reject(new Error(`Failed to send message to worker: ${errorDetail}`));
+
+        // Call Roboflow API
+        const response = await fetch(`https://detect.roboflow.com/soccer-ball-detection/1?api_key=${this.roboflowApiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: base64Image
+        });
+
+        if (!response.ok) {
+          throw new Error(`Roboflow API error: ${response.status} ${response.statusText}`);
+        }
+
+        const roboflowResult = await response.json();
+        
+        // Convert Roboflow result to our format
+        const result = await this.processRoboflowResult(roboflowResult, imageUrl, fileName);
+        
+        if (this.requests.has(requestId)) {
+          clearTimeout(timer);
+          this.requests.delete(requestId);
+          resolve(result);
+        }
+      } catch (error: any) {
+        if (this.requests.has(requestId)) {
+          clearTimeout(timer);
+          this.requests.delete(requestId);
+          reject(error);
+        }
       }
     });
   }
 
-  private async fallbackDetection(imageUrl: string, fileName: string): Promise<DetectionResult> {
-    // Simulate processing time
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  private async convertToBase64(imageUrl: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+          reject(new Error('Could not get canvas context'));
+          return;
+        }
 
-    // Create a canvas to draw on the image
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+        
+        const base64 = canvas.toDataURL('image/jpeg', 0.8);
+        resolve(base64);
+      };
+      
+      img.onerror = () => {
+        reject(new Error(`Failed to load image: ${imageUrl}`));
+      };
+      
+      img.src = imageUrl;
+    });
+  }
+
+  private async processRoboflowResult(roboflowResult: any, originalImageUrl: string, fileName: string): Promise<DetectionResult> {
+    const predictions = roboflowResult.predictions || [];
+    
+    // Load the original image to draw detections
     const img = new Image();
     img.crossOrigin = 'anonymous';
     
@@ -121,43 +134,40 @@ export class BallDetectionEngine {
         // Draw the original image
         ctx.drawImage(img, 0, 0);
         
-        // Mock detection: create some random circles
-        const detections = [];
-        const numBalls = Math.floor(Math.random() * 3) + 1; // 1-3 balls
-        
-        for (let i = 0; i < numBalls; i++) {
-          const x = Math.random() * (canvas.width - 100) + 50;
-          const y = Math.random() * (canvas.height - 100) + 50;
-          const radius = Math.random() * 30 + 20;
+        // Draw detection boxes
+        const detections = predictions.map((prediction: any) => {
+          const { x, y, width, height, confidence, class: className } = prediction;
           
-          // Draw circle
+          // Convert from center coordinates to top-left coordinates
+          const left = x - width / 2;
+          const top = y - height / 2;
+          
+          // Draw bounding box
           ctx.strokeStyle = '#00ff00';
           ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(x, y, radius, 0, 2 * Math.PI);
-          ctx.stroke();
+          ctx.strokeRect(left, top, width, height);
           
           // Draw label
           ctx.fillStyle = '#00ff00';
           ctx.font = 'bold 16px Arial';
-          const confidence = 0.7 + Math.random() * 0.3;
-          ctx.fillText(`Ball ${i + 1}: ${Math.round(confidence * 100)}%`, x - radius, y - radius - 10);
+          const label = `${className}: ${Math.round(confidence * 100)}%`;
+          ctx.fillText(label, left, top - 10);
           
-          detections.push({
+          return {
             confidence,
             bbox: {
-              x: (x - radius) / canvas.width,
-              y: (y - radius) / canvas.height,
-              width: (radius * 2) / canvas.width,
-              height: (radius * 2) / canvas.height,
+              x: left / canvas.width,
+              y: top / canvas.height,
+              width: width / canvas.width,
+              height: height / canvas.height,
             },
-          });
-        }
+          };
+        });
         
         const result: DetectionResult = {
           id: Math.random().toString(36).substring(2, 11),
           imageUrl: canvas.toDataURL('image/png'),
-          originalImageUrl: imageUrl,
+          originalImageUrl,
           fileName,
           detections,
           processedAt: new Date(),
@@ -170,20 +180,17 @@ export class BallDetectionEngine {
         reject(new Error(`Failed to load image: ${fileName}`));
       };
       
-      img.src = imageUrl;
+      img.src = originalImageUrl;
     });
   }
 
   public terminateWorker(): void {
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = null;
-      this.requests.forEach(pending => {
-        if (pending.timer) clearTimeout(pending.timer);
-        pending.reject(new Error('Worker terminated by explicit call.'));
-      });
-      this.requests.clear();
-      console.log('OpenCV Worker terminated.');
-    }
+    // Clean up any pending requests
+    this.requests.forEach(pending => {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.reject(new Error('Detection engine terminated.'));
+    });
+    this.requests.clear();
+    console.log('Roboflow Detection Engine terminated.');
   }
 }

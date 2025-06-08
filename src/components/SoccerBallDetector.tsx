@@ -16,6 +16,7 @@ import ImageUpload from './ImageUpload';
 import UrlInput from './UrlInput';
 import BulkUpload from './BulkUpload';
 import DetectionResults from './DetectionResults';
+import RoboflowApiKeyInput from './RoboflowApiKeyInput';
 import { BallDetectionEngine } from './BallDetectionEngine';
 import DetectionParameters from './DetectionParameters';
 import { DetectionParams } from './AdvancedSoccerDetector'; // Using type from AdvancedSoccerDetector for consistency
@@ -58,6 +59,7 @@ const SoccerBallDetector = (): JSX.Element => {
   const [activeTab, setActiveTab] = useState<string>('upload');
   const [results, setResults] = useState<DetectionResult[]>([]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isRoboflowReady, setIsRoboflowReady] = useState<boolean>(false);
   const detectionEngine = useRef(new BallDetectionEngine());
 
   // State for detection parameters, initialized with default values.
@@ -75,11 +77,12 @@ const SoccerBallDetector = (): JSX.Element => {
    * Effect hook to terminate the detection worker when the component unmounts.
    */
   useEffect(() => {
-    const currentEngineInstance = detectionEngine.current;
-    return () => {
-      currentEngineInstance.terminateWorker();
-    };
-  }, []); // Empty dependency array ensures this runs only on mount and unmount
+    const savedKey = localStorage.getItem('roboflow_api_key');
+    if (savedKey) {
+      setIsRoboflowReady(true);
+      detectionEngine.current.setApiKey(savedKey);
+    }
+  }, []);
 
   /**
    * Callback to update detection parameters from the DetectionParameters component.
@@ -90,12 +93,27 @@ const SoccerBallDetector = (): JSX.Element => {
   };
 
   /**
+   * Callback to handle setting the Roboflow API key.
+   * @param {string} apiKey - The API key to set.
+   */
+  const handleApiKeySet = (apiKey: string) => {
+    detectionEngine.current.setApiKey(apiKey);
+    setIsRoboflowReady(true);
+    toast.success('Ready to detect soccer balls with Roboflow!');
+  };
+
+  /**
    * Processes a single image (from upload or URL).
    * @async
    * @param {string} imageUrl - The URL of the image to process (can be a data URL or external URL).
    * @param {string} fileName - The name associated with the image.
    */
   const processImage = async (imageUrl: string, fileName: string) => {
+    if (!isRoboflowReady) {
+      toast.error('Please configure your Roboflow API key first.');
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const result = await detectionEngine.current.detectBalls(imageUrl, fileName, detectionParams);
@@ -106,14 +124,12 @@ const SoccerBallDetector = (): JSX.Element => {
       // Attempt to provide more user-friendly messages based on error content
       let toastMessage = `Failed to process ${fileName}: An unknown error occurred.`;
       if (error && typeof error.message === 'string') {
-        if (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available')) {
-          toastMessage = 'Detection engine is not ready. Please try again or contact support.';
+        if (error.message.includes('API key is required')) {
+          toastMessage = 'Please configure your Roboflow API key first.';
+        } else if (error.message.includes('Roboflow API error')) {
+          toastMessage = `Roboflow API error: ${error.message}`;
         } else if (error.message.startsWith('Failed to load image')) {
           toastMessage = `Error loading image ${fileName}: ${error.message}`;
-        } else if (error.message.startsWith('Error processing image') || error.message.includes('Details:')) {
-          // Extract details if present, otherwise use the main message
-          const detailIndex = error.message.indexOf('Details:');
-          toastMessage = `Failed to process ${fileName}: ${detailIndex !== -1 ? error.message.substring(detailIndex + 8) : error.message}`;
         } else if (error.message.includes('timed out')) {
             toastMessage = `Processing for ${fileName} timed out. Please try again.`;
         } else {
@@ -132,6 +148,11 @@ const SoccerBallDetector = (): JSX.Element => {
    * @param {File[]} files - An array of File objects to process.
    */
   const processBulkImages = async (files: File[]) => {
+    if (!isRoboflowReady) {
+      toast.error('Please configure your Roboflow API key first.');
+      return;
+    }
+
     if (files.length === 0) {
       toast.info("No files selected for bulk processing.");
       return;
@@ -155,15 +176,12 @@ const SoccerBallDetector = (): JSX.Element => {
         console.error(`Error processing ${file.name} during bulk upload:`, error);
         let toastMessage = `Failed to process ${file.name}: An unknown error occurred.`;
          if (error && typeof error.message === 'string') {
-            if (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available')) {
-              toastMessage = 'Detection engine is not ready. Bulk processing halted.';
-              toast.error(toastMessage);
-              break; // Halt further processing for fundamental issues
+            if (error.message.includes('API key is required')) {
+              toastMessage = 'Please configure your Roboflow API key first.';
+            } else if (error.message.includes('Roboflow API error')) {
+              toastMessage = `Roboflow API error: ${error.message}`;
             } else if (error.message.startsWith('Failed to load image')) {
               toastMessage = `Error loading image ${file.name}: ${error.message}`;
-            } else if (error.message.startsWith('Error processing image') || error.message.includes('Details:')) {
-              const detailIndex = error.message.indexOf('Details:');
-              toastMessage = `Failed to process ${file.name}: ${detailIndex !== -1 ? error.message.substring(detailIndex + 8) : error.message}`;
             } else if (error.message.includes('timed out')) {
                 toastMessage = `Processing for ${file.name} timed out.`;
             } else {
@@ -176,7 +194,7 @@ const SoccerBallDetector = (): JSX.Element => {
         // Optional: Small delay for UI updates if processing many files rapidly.
         // await new Promise(resolve => setTimeout(resolve, 50));
       }
-      if (processError && typeof processError.message === 'string' && (processError.message.includes('OpenCV is not loaded') || processError.message.includes('OpenCV Worker is not available'))) {
+      if (processError && typeof processError.message === 'string' && (processError.message.includes('API key is required') || processError.message.includes('Roboflow API error'))) {
         break; // Ensure loop termination if fundamental error occurred
       }
     }
@@ -204,9 +222,12 @@ const SoccerBallDetector = (): JSX.Element => {
             ⚽ Soccer Ball Detector
           </h1>
           <p className="text-lg text-green-600">
-            AI-powered soccer ball detection with visual highlighting
+            Roboflow-powered soccer ball detection with visual highlighting
           </p>
         </div>
+
+        {/* API Key Configuration */}
+        <RoboflowApiKeyInput onApiKeySet={handleApiKeySet} />
 
         <Card className="mb-8 bg-white shadow-xl border-green-200">
           <CardHeader>
