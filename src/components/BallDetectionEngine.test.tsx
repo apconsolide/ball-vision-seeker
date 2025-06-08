@@ -1,3 +1,4 @@
+
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { BallDetectionEngine } from './BallDetectionEngine';
 import { DetectionParams } from './AdvancedSoccerDetector';
@@ -63,7 +64,7 @@ describe('BallDetectionEngine', () => {
   let defaultParams: DetectionParams;
 
   beforeAll(() => {
-    window.cv = mockCv;
+    (window as any).cv = mockCv;
     vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
       if (tagName === 'canvas') {
         return mockCanvas;
@@ -97,7 +98,7 @@ describe('BallDetectionEngine', () => {
     mockMat.data32F = new Float32Array([]);
 
     // Re-assign window.cv for each test in case a test modifies it
-    window.cv = mockCv;
+    (window as any).cv = mockCv;
 
     // Setup default implementations for mocks that return other mocks
     // This ensures that if a test doesn't override HoughCircles, it defaults to finding no circles.
