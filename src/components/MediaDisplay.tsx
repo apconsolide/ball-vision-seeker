@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 
 interface MediaDisplayProps {
   currentMedia: string | null;
+  processedResults?: string | null;
   isWebcamActive: boolean;
   videoRef: React.RefObject<HTMLVideoElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
@@ -14,6 +15,7 @@ interface MediaDisplayProps {
 
 const MediaDisplay = ({ 
   currentMedia, 
+  processedResults,
   isWebcamActive, 
   videoRef, 
   canvasRef,
@@ -33,9 +35,9 @@ const MediaDisplay = ({
         <Tabs defaultValue="original" className="w-full">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="original">Original</TabsTrigger>
+            <TabsTrigger value="result">Result</TabsTrigger>
             <TabsTrigger value="processed">Processed</TabsTrigger>
             <TabsTrigger value="mask">Mask</TabsTrigger>
-            <TabsTrigger value="result">Result</TabsTrigger>
           </TabsList>
           
           <TabsContent value="original" className="mt-4">
@@ -69,6 +71,23 @@ const MediaDisplay = ({
             </div>
           </TabsContent>
           
+          <TabsContent value="result" className="mt-4">
+            <div className="bg-gray-100 rounded-lg aspect-video flex items-center justify-center overflow-hidden">
+              {processedResults ? (
+                <img
+                  src={processedResults}
+                  alt="Detection results"
+                  className="w-full h-full object-contain"
+                />
+              ) : (
+                <div className="text-gray-500 text-center">
+                  <p>Detection results will appear here</p>
+                  <p className="text-sm mt-1">With highlighted soccer balls</p>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+          
           <TabsContent value="processed" className="mt-4">
             <div className="bg-gray-100 rounded-lg aspect-video flex items-center justify-center">
               <canvas
@@ -88,15 +107,6 @@ const MediaDisplay = ({
               <div className="text-gray-500 text-center">
                 <p>Color/threshold masks</p>
                 <p className="text-sm mt-1">Binary masks used for detection</p>
-              </div>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="result" className="mt-4">
-            <div className="bg-gray-100 rounded-lg aspect-video flex items-center justify-center">
-              <div className="text-gray-500 text-center">
-                <p>Detection results</p>
-                <p className="text-sm mt-1">Original with detected circles overlaid</p>
               </div>
             </div>
           </TabsContent>

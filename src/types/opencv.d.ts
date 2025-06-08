@@ -17,6 +17,8 @@ declare global {
         minRadius?: number,
         maxRadius?: number
       ) => void;
+      GaussianBlur: (src: any, dst: any, ksize: any, sigmaX: number, sigmaY?: number) => void;
+      matFromImageData: (imageData: ImageData) => any;
       HOUGH_GRADIENT: number;
       COLOR_BGR2GRAY: number;
       COLOR_RGBA2GRAY: number;

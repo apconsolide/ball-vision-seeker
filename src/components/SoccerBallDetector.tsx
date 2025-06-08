@@ -2,8 +2,6 @@
 import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Upload, Link, Image as ImageIcon, Video, FileImage } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,10 +9,12 @@ import ImageUpload from './ImageUpload';
 import UrlInput from './UrlInput';
 import BulkUpload from './BulkUpload';
 import DetectionResults from './DetectionResults';
+import { BallDetectionEngine } from './BallDetectionEngine';
 
 export interface DetectionResult {
   id: string;
   imageUrl: string;
+  originalImageUrl?: string;
   fileName: string;
   detections: Array<{
     confidence: number;
@@ -32,36 +32,12 @@ const SoccerBallDetector = () => {
   const [activeTab, setActiveTab] = useState('upload');
   const [results, setResults] = useState<DetectionResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-
-  const mockDetection = (imageUrl: string, fileName: string): DetectionResult => {
-    // Simulate AI detection with random results
-    const numDetections = Math.floor(Math.random() * 3) + 1;
-    const detections = Array.from({ length: numDetections }, () => ({
-      confidence: 0.75 + Math.random() * 0.24,
-      bbox: {
-        x: Math.random() * 0.6,
-        y: Math.random() * 0.6,
-        width: 0.1 + Math.random() * 0.2,
-        height: 0.1 + Math.random() * 0.2,
-      },
-    }));
-
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      imageUrl,
-      fileName,
-      detections,
-      processedAt: new Date(),
-    };
-  };
+  const detectionEngine = useRef(new BallDetectionEngine());
 
   const processImage = async (imageUrl: string, fileName: string) => {
     setIsProcessing(true);
     try {
-      // Simulate processing time
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      const result = mockDetection(imageUrl, fileName);
+      const result = await detectionEngine.current.detectBalls(imageUrl, fileName);
       setResults(prev => [result, ...prev]);
       
       toast.success(`Detected ${result.detections.length} soccer ball(s) in ${fileName}`);
@@ -80,10 +56,11 @@ const SoccerBallDetector = () => {
       
       for (const file of files) {
         const imageUrl = URL.createObjectURL(file);
-        await new Promise(resolve => setTimeout(resolve, 800));
-        
-        const result = mockDetection(imageUrl, file.name);
+        const result = await detectionEngine.current.detectBalls(imageUrl, file.name);
         newResults.push(result);
+        
+        // Add a small delay to show progress
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
       
       setResults(prev => [...newResults, ...prev]);
@@ -104,7 +81,7 @@ const SoccerBallDetector = () => {
             ⚽ Soccer Ball Detector
           </h1>
           <p className="text-lg text-green-600">
-            AI-powered soccer ball detection for images and videos
+            AI-powered soccer ball detection with visual highlighting
           </p>
         </div>
 

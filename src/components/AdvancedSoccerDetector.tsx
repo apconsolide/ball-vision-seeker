@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,6 +11,7 @@ import AdvancedSettings from './AdvancedSettings';
 import DetectionModes from './DetectionModes';
 import MediaDisplay from './MediaDisplay';
 import StatisticsPanel from './StatisticsPanel';
+import { BallDetectionEngine } from './BallDetectionEngine';
 
 export interface DetectionParams {
   minDistance: number;
@@ -46,10 +46,12 @@ const AdvancedSoccerDetector = () => {
   const [isWebcamActive, setIsWebcamActive] = useState(false);
   const [currentMedia, setCurrentMedia] = useState<string | null>(null);
   const [detectionMode, setDetectionMode] = useState('standard');
+  const [processedResults, setProcessedResults] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const detectionEngine = useRef(new BallDetectionEngine());
 
   const [detectionParams, setDetectionParams] = useState<DetectionParams>({
     minDistance: 50,
@@ -151,8 +153,8 @@ const AdvancedSoccerDetector = () => {
   };
 
   const detectBalls = async () => {
-    if (!isOpenCVReady || !window.cv) {
-      toast.error('OpenCV.js is not ready yet. Please wait for it to load.');
+    if (!currentMedia && !isWebcamActive) {
+      toast.error('Please upload an image or start webcam first');
       return;
     }
 
@@ -160,23 +162,39 @@ const AdvancedSoccerDetector = () => {
     const startTime = performance.now();
 
     try {
-      // Basic OpenCV.js operations to verify it's working
-      console.log('OpenCV.js is ready, version:', window.cv.getBuildInformation());
-      
-      // Simulate processing time and detection
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      let result;
+      const params = {
+        ...detectionParams,
+        ...colorParams,
+        ...advancedParams
+      };
+
+      if (isOpenCVReady && window.cv && detectionMode !== 'standard') {
+        // Use OpenCV for advanced detection
+        result = await detectionEngine.current.detectWithOpenCV(
+          currentMedia!, 
+          'webcam-frame', 
+          params
+        );
+      } else {
+        // Use simple detection
+        result = await detectionEngine.current.detectBalls(
+          currentMedia!, 
+          'uploaded-image'
+        );
+      }
+
+      setProcessedResults(result.imageUrl);
       
       const processingTime = performance.now() - startTime;
-      const mockBalls = Math.floor(Math.random() * 5) + 1;
-      
       setStats({
-        ballsFound: mockBalls,
+        ballsFound: result.detections.length,
         processingTime: Math.round(processingTime),
-        confidence: 75 + Math.random() * 20,
+        confidence: result.detections.reduce((sum, d) => sum + d.confidence, 0) / result.detections.length * 100,
         fps: isWebcamActive ? 30 : 0,
       });
 
-      toast.success(`Detected ${mockBalls} soccer ball(s) using ${detectionMode} mode`);
+      toast.success(`Detected ${result.detections.length} soccer ball(s) using ${detectionMode} mode`);
     } catch (error) {
       console.error('Detection error:', error);
       toast.error('Detection failed. Please try again.');
@@ -280,7 +298,6 @@ const AdvancedSoccerDetector = () => {
               </CardContent>
             </Card>
 
-            {/* Detection Modes */}
             <DetectionModes 
               currentMode={detectionMode}
               onModeChange={setDetectionMode}
@@ -291,7 +308,7 @@ const AdvancedSoccerDetector = () => {
               <CardContent className="p-4 space-y-3">
                 <Button
                   onClick={detectBalls}
-                  disabled={!isOpenCVReady || isProcessing}
+                  disabled={isProcessing}
                   className="w-full"
                 >
                   <Play className="h-4 w-4 mr-2" />
@@ -311,7 +328,6 @@ const AdvancedSoccerDetector = () => {
               </CardContent>
             </Card>
 
-            {/* Statistics */}
             <StatisticsPanel stats={stats} />
           </div>
 
@@ -319,6 +335,7 @@ const AdvancedSoccerDetector = () => {
           <div className="xl:col-span-1">
             <MediaDisplay
               currentMedia={currentMedia}
+              processedResults={processedResults}
               isWebcamActive={isWebcamActive}
               videoRef={videoRef}
               canvasRef={canvasRef}
