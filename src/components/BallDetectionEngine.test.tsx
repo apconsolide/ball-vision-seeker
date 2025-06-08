@@ -63,7 +63,6 @@ describe('BallDetectionEngine', () => {
   let defaultParams: DetectionParams;
 
   beforeAll(() => {
-    // @ts-expect-error - assigning to window for testing
     window.cv = mockCv;
     vi.spyOn(document, 'createElement').mockImplementation((tagName) => {
       if (tagName === 'canvas') {
@@ -98,7 +97,6 @@ describe('BallDetectionEngine', () => {
     mockMat.data32F = new Float32Array([]);
 
     // Re-assign window.cv for each test in case a test modifies it
-    // @ts-expect-error - assigning to window for testing
     window.cv = mockCv;
 
     // Setup default implementations for mocks that return other mocks
@@ -119,8 +117,7 @@ describe('BallDetectionEngine', () => {
     // as long as cv.Mat() returns deletable objects.
 
     // Store createdMats to check deletion later
-    // @ts-expect-error - attaching to mockCv for test purposes
-    mockCv._createdMats = createdMats;
+    (mockCv as any)._createdMats = createdMats;
 
     // Mock Image constructor again to ensure fresh instance for each test
     global.Image = vi.fn(() => {
@@ -137,14 +134,12 @@ describe('BallDetectionEngine', () => {
   });
 
   afterEach(() => {
-    // @ts-expect-error - cleanup
-    delete window.cv;
-    // @ts-expect-error - cleanup
-    delete mockCv._createdMats;
+    delete (window as any).cv;
+    delete (mockCv as any)._createdMats;
   });
 
   it('should throw an error if OpenCV is not loaded', async () => {
-    window.cv = undefined;
+    (window as any).cv = undefined;
     engine = new BallDetectionEngine(); // Re-initialize to pick up undefined cv
 
     await expect(engine.detectBalls('dummy.jpg', 'dummy.jpg', defaultParams))
@@ -280,8 +275,7 @@ describe('BallDetectionEngine', () => {
 
       await engine.detectBalls('delete.jpg', 'delete.jpg', defaultParams);
 
-      // @ts-expect-error - accessing private test property
-      const createdMats = mockCv._createdMats as Array<{ id: string, delete: () => void, called?: boolean }>;
+      const createdMats = (mockCv as any)._createdMats as Array<{ id: string, delete: () => void, called?: boolean }>;
 
       // The engine creates: src, gray, blurred, circles
       // matFromImageData creates 'srcMat' (which is not part of _createdMats as it's returned directly)
@@ -297,8 +291,7 @@ describe('BallDetectionEngine', () => {
       expect(matFromImageDataInstance.delete).toHaveBeenCalled();
 
       // Check Mats created by new cv.Mat()
-      // @ts-expect-error - accessing private test property
-      const matsForNew = mockCv._createdMats as Array<{ id: string, delete: () => void }>;
+      const matsForNew = (mockCv as any)._createdMats as Array<{ id: string, delete: () => void }>;
       expect(matsForNew.length).toBeGreaterThanOrEqual(3); // gray, blurred, circles (could be more if test is run multiple times or other logic)
                                                           // Due to beforeEach, it should be exactly 3 for this run of detectBalls
 
