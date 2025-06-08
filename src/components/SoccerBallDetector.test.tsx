@@ -300,11 +300,11 @@ describe('SoccerBallDetector', () => {
       userEvent.click(uploadButton);
 
       await waitFor(() => {
-         expect(uploadButton.disabled).toBe(true);
+         expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
       });
 
       await waitFor(() => {
-        expect(uploadButton.disabled).toBe(false);
+        expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
       }, {timeout: 500});
     });
   });

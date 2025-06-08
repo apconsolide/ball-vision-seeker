@@ -144,7 +144,6 @@ describe('BallDetectionEngine', () => {
   });
 
   it('should throw an error if OpenCV is not loaded', async () => {
-    // @ts-expect-error - deliberately undefined
     window.cv = undefined;
     engine = new BallDetectionEngine(); // Re-initialize to pick up undefined cv
 
