@@ -5,7 +5,7 @@ import { DetectionParams } from './AdvancedSoccerDetector';
 interface PendingRequest {
   resolve: (value: DetectionResult) => void;
   reject: (reason?: any) => void;
-  timer?: number;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export class BallDetectionEngine {

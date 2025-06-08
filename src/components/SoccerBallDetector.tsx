@@ -148,24 +148,24 @@ const SoccerBallDetector = (): JSX.Element => {
         newResults.push(result);
         successfulUploads++;
         toast.success(`Processed ${file.name} successfully.`);
-      } catch (error: any) {
+      } catch (err: any) {
         aFileFailed = true;
-        console.error(`Error processing ${file.name} during bulk upload:`, error);
+        console.error(`Error processing ${file.name} during bulk upload:`, err);
         let toastMessage = `Failed to process ${file.name}: An unknown error occurred.`;
-         if (error && typeof error.message === 'string') {
-            if (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available')) {
+         if (err && typeof err.message === 'string') {
+            if (err.message.includes('OpenCV is not loaded') || err.message.includes('OpenCV Worker is not available')) {
               toastMessage = 'Detection engine is not ready. Bulk processing halted.';
               toast.error(toastMessage);
               break; // Halt further processing for fundamental issues
-            } else if (error.message.startsWith('Failed to load image')) {
-              toastMessage = `Error loading image ${file.name}: ${error.message}`;
-            } else if (error.message.startsWith('Error processing image') || error.message.includes('Details:')) {
-              const detailIndex = error.message.indexOf('Details:');
-              toastMessage = `Failed to process ${file.name}: ${detailIndex !== -1 ? error.message.substring(detailIndex + 8) : error.message}`;
-            } else if (error.message.includes('timed out')) {
+            } else if (err.message.startsWith('Failed to load image')) {
+              toastMessage = `Error loading image ${file.name}: ${err.message}`;
+            } else if (err.message.startsWith('Error processing image') || err.message.includes('Details:')) {
+              const detailIndex = err.message.indexOf('Details:');
+              toastMessage = `Failed to process ${file.name}: ${detailIndex !== -1 ? err.message.substring(detailIndex + 8) : err.message}`;
+            } else if (err.message.includes('timed out')) {
                 toastMessage = `Processing for ${file.name} timed out.`;
             } else {
-                toastMessage = `Failed to process ${file.name}: ${error.message}`;
+                toastMessage = `Failed to process ${file.name}: ${err.message}`;
             }
         }
         toast.error(toastMessage);
@@ -174,7 +174,7 @@ const SoccerBallDetector = (): JSX.Element => {
         // Optional: Small delay for UI updates if processing many files rapidly.
         // await new Promise(resolve => setTimeout(resolve, 50));
       }
-      if (error && typeof error.message === 'string' && (error.message.includes('OpenCV is not loaded') || error.message.includes('OpenCV Worker is not available'))) {
+      if (err && typeof err.message === 'string' && (err.message.includes('OpenCV is not loaded') || err.message.includes('OpenCV Worker is not available'))) {
         break; // Ensure loop termination if fundamental error occurred
       }
     }

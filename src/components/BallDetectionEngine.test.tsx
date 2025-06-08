@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
-import { BallDetectionEngine } from './BallDetectionEngine'; // Assuming DetectionResult is also exported or can be mocked
+import { BallDetectionEngine } from './BallDetectionEngine';
+import { DetectionParams } from './AdvancedSoccerDetector';
 
 // Mock for HTMLCanvasElement and its context
 const mockCtx = {
@@ -59,6 +60,7 @@ const mockCv = {
 
 describe('BallDetectionEngine', () => {
   let engine: BallDetectionEngine;
+  let defaultParams: DetectionParams;
 
   beforeAll(() => {
     // @ts-expect-error - assigning to window for testing
@@ -74,6 +76,16 @@ describe('BallDetectionEngine', () => {
 
   beforeEach(() => {
     engine = new BallDetectionEngine();
+    // Define default params to use in tests
+    defaultParams = {
+      minDistance: 50,
+      cannyThreshold: 100,
+      circleThreshold: 30,
+      minRadius: 10,
+      maxRadius: 100,
+      blurKernelSize: 5,
+      dp: 1,
+    };
     // Reset mocks for each test
     vi.clearAllMocks();
 
@@ -110,7 +122,6 @@ describe('BallDetectionEngine', () => {
     // @ts-expect-error - attaching to mockCv for test purposes
     mockCv._createdMats = createdMats;
 
-
     // Mock Image constructor again to ensure fresh instance for each test
     global.Image = vi.fn(() => {
         mockImageInstance = {
@@ -137,7 +148,7 @@ describe('BallDetectionEngine', () => {
     window.cv = undefined;
     engine = new BallDetectionEngine(); // Re-initialize to pick up undefined cv
 
-    await expect(engine.detectBalls('dummy.jpg', 'dummy.jpg', {}))
+    await expect(engine.detectBalls('dummy.jpg', 'dummy.jpg', defaultParams))
       .rejects
       .toThrow('OpenCV is not loaded. Please ensure the OpenCV script is included and loaded correctly.');
   });
@@ -146,7 +157,7 @@ describe('BallDetectionEngine', () => {
     const testError = new ErrorEvent('Image load error');
     setTimeout(() => mockImageInstance.onerror(testError), 0); // Simulate async error
 
-    await expect(engine.detectBalls('fail.jpg', 'fail.jpg', {}))
+    await expect(engine.detectBalls('fail.jpg', 'fail.jpg', defaultParams))
       .rejects
       .toThrow('Failed to load image from URL: fail.jpg. Event type: Image load error.');
   });
@@ -169,7 +180,7 @@ describe('BallDetectionEngine', () => {
         // The mockMat default has cols = 0
       });
 
-      const result = await engine.detectBalls('test.jpg', 'test.jpg', {});
+      const result = await engine.detectBalls('test.jpg', 'test.jpg', defaultParams);
       expect(result.detections).toEqual([]);
       expect(result.fileName).toBe('test.jpg');
       expect(result.originalImageUrl).toBe('test.jpg');
@@ -188,7 +199,7 @@ describe('BallDetectionEngine', () => {
       // Ensure the 'circles' Mat passed to HoughCircles is one of those tracked for deletion
       // This is implicitly handled if cv.Mat() is mocked correctly to return tracked Mats.
 
-      const result = await engine.detectBalls('circles.jpg', 'circles.jpg', {});
+      const result = await engine.detectBalls('circles.jpg', 'circles.jpg', defaultParams);
 
       expect(result.detections.length).toBe(2);
       expect(result.detections[0].bbox).toEqual({
@@ -215,7 +226,7 @@ describe('BallDetectionEngine', () => {
         throw opencvError;
       });
 
-      await expect(engine.detectBalls('error.jpg', 'error.jpg', {}))
+      await expect(engine.detectBalls('error.jpg', 'error.jpg', defaultParams))
         .rejects
         .toThrow('Error processing image error.jpg. Details: cv.cvtColor failed badly');
     });
@@ -268,7 +279,7 @@ describe('BallDetectionEngine', () => {
         circles.data32F = new Float32Array([10,20,5]);
       });
 
-      await engine.detectBalls('delete.jpg', 'delete.jpg', {});
+      await engine.detectBalls('delete.jpg', 'delete.jpg', defaultParams);
 
       // @ts-expect-error - accessing private test property
       const createdMats = mockCv._createdMats as Array<{ id: string, delete: () => void, called?: boolean }>;
@@ -282,7 +293,7 @@ describe('BallDetectionEngine', () => {
       const matFromImageDataInstance = { ...mockMat, id: 'srcMatFromTest', delete: vi.fn() };
       mockCv.matFromImageData.mockReturnValue(matFromImageDataInstance);
 
-      await engine.detectBalls('delete2.jpg', 'delete2.jpg', {}); // Re-run with the refined mock
+      await engine.detectBalls('delete2.jpg', 'delete2.jpg', defaultParams); // Re-run with the refined mock
 
       expect(matFromImageDataInstance.delete).toHaveBeenCalled();
 
